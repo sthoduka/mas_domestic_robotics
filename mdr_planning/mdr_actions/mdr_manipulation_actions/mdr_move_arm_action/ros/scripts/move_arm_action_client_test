@@ -54,7 +54,9 @@ if __name__ == '__main__':
                 pose.pose.orientation.w = params[7]
 
                 goal.end_effector_pose = pose
-                goal.dmp_name = ''
+                goal.dmp_name = 'example.yaml'
+                # goal.dmp_name = '/home/lucy/ros/kinetic/src/mas_domestic_robotics/mdr_planning/mdr_actions/mdr_manipulation_actions/mdr_pickup_action/config/trajectory_weights/weights_table_grasp2.yaml'
+                goal.dmp_tau = 30.
             elif goal.goal_type == MoveArmGoal.JOINT_VALUES:
                 params = ast.literal_eval(sys.argv[2])
                 goal.joint_values = params

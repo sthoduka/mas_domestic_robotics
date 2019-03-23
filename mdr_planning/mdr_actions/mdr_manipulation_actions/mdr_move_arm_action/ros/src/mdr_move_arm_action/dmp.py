@@ -3,6 +3,7 @@ import rospy
 from std_msgs.msg import Float32MultiArray
 from geometry_msgs.msg import PoseStamped, TwistStamped, Vector3Stamped, Twist
 from nav_msgs.msg import Path
+from ros_dmp.srv import *
 import tf
 import actionlib
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
@@ -23,9 +24,12 @@ class DMPExecutor(object):
                                                                  '/arm_controller/sigma_values')
         self.dmp_executor_path_topic = rospy.get_param('~path_topic', '/dmp_executor/path')
         self.move_base_server = rospy.get_param('~move_base_server', 'move_base/move')
-
+        
+        # ros_dmp service
+        self.motion_client = rospy.ServiceProxy('/generate_motion_service', GenerateMotion)
+ 
         self.number_of_sampling_points = 30
-        self.goal_tolerance = 0.02
+        self.goal_tolerance = 0.05
         self.vel_publisher_arm = rospy.Publisher(self.cartesian_velocity_topic,
                                                  TwistStamped, queue_size=1)
         self.vel_publisher_base = rospy.Publisher(self.base_vel_topic, Twist, queue_size=1)
@@ -58,10 +62,29 @@ class DMPExecutor(object):
         print self.move_base_client.send_goal(move_base_goal)
 
     def generate_trajectory(self, goal, initial_pos):
-        goal = np.array([goal[0], goal[1], goal[2], 0.0, 0.0, 0.0])
-        initial_pos = np.array([initial_pos[0], initial_pos[1], initial_pos[2], 0.0, 0.0, 0.0])
-        self.roll = RollDMP(self.dmp_name, n_bfs=150)
-        self.pos, self.vel, self.acc = self.roll.roll(goal, initial_pos, self.tau)
+        req = GenerateMotionRequest()
+        req.goal_pose.pose.position.x = goal[0]
+        req.goal_pose.pose.position.y = goal[1]
+        req.goal_pose.pose.position.z = goal[2]
+        req.initial_pose.pose.position.x = initial_pos[0]
+        req.initial_pose.pose.position.y = initial_pos[1]
+        req.initial_pose.pose.position.z = initial_pos[2]
+        req.dmp_name = self.dmp_name
+        req.tau = self.tau
+        req.dt = 0.001
+        print req
+        response = self.motion_client(req)
+        pos_x = []
+        pos_y = []
+        pos_z = []
+        for state in response.cart_traj.cartesian_state:
+            pos_x.append(state.pose.position.x)
+            pos_y.append(state.pose.position.y)
+            pos_z.append(state.pose.position.z)
+        self.pos = np.array(pos_x)
+        self.pos = np.vstack((self.pos, np.array(pos_y)))        
+        self.pos = np.vstack((self.pos, np.array(pos_z)))  
+        print self.pos, self.pos.shape      
 
     def tranform_pose(self, pose):
         #transform goals to odom frame
@@ -94,10 +117,13 @@ class DMPExecutor(object):
         previous_pos = None
         count = 0
         previous_index = 0
-        path = self.pos[:, 0:3].T
+        path = self.pos
         path_x = path[0, :]
         path_y = path[1, :]
         path_z = path[2, :]
+        print path_x
+        print path_y
+        print path_z
         while not rospy.is_shutdown():
             try:
                 (trans, rot) = self.tf_listener.lookupTransform(self.odom_frame_name, self.palm_link_name, rospy.Time(0))
@@ -162,7 +188,8 @@ class DMPExecutor(object):
 
             if self.min_sigma_value != None and self.min_sigma_value < self.sigma_threshold_upper and self.deploy_wbc:
                 ratio = (self.min_sigma_value - self.sigma_threshold_lower) / (self.sigma_threshold_upper - self.sigma_threshold_lower)
-
+                
+                print "================================================================================="
                 vel_x_arm = vel_x * (ratio)
                 vel_y_arm = vel_y * (ratio)
                 vel_x_base = vel_x * (1 - ratio)
